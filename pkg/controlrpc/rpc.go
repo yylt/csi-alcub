@@ -1,18 +1,18 @@
 package controlrpc
 
 import (
-	klog "k8s.io/klog/v2"
 	"context"
-	"github.com/pborman/uuid"
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/pborman/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	klog "k8s.io/klog/v2"
 )
 
-func (c *Controller) ControllerGetCapabilities(context.Context, *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error){
+func (c *Controller) ControllerGetCapabilities(context.Context, *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {
 	return &csi.ControllerGetCapabilitiesResponse{
-		Capabilities:         c.caps,
-	},nil
+		Capabilities: c.caps,
+	}, nil
 }
 
 // Called by external-provisor, and only once
@@ -20,7 +20,7 @@ func (c *Controller) ControllerGetCapabilities(context.Context, *csi.ControllerG
 // - check name exist?
 // - create volume and uuid
 // - create cr which used by node rpc
-func (c *Controller) CreateVolume(ctx context.Context,req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+func (c *Controller) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	// Check arguments
 	if len(req.GetName()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Name missing in request")
@@ -32,8 +32,8 @@ func (c *Controller) CreateVolume(ctx context.Context,req *csi.CreateVolumeReque
 
 	// Keep a record of the requested access types.
 	var (
-		accessTypeMount, accessTypeBlock bool
-		topologies []*csi.Topology
+		accessTypeMount bool
+		topologies      []*csi.Topology
 	)
 
 	for _, ca := range caps {
@@ -58,14 +58,14 @@ func (c *Controller) CreateVolume(ctx context.Context,req *csi.CreateVolumeReque
 	//TODO check max storage capacity
 
 	alcub := c.alcubControl.GetByName(req.GetName())
-	if alcub!= nil{
+	if alcub != nil {
 		if alcub.Spec.Capacity < capacity {
 			return nil, status.Errorf(codes.AlreadyExists, "Volume with the same name: %s but with different size already exist", req.GetName())
 		}
 		return &csi.CreateVolumeResponse{
 			Volume: &csi.Volume{
-				VolumeId:       alcub.Spec.Uuid,
-				CapacityBytes: int64( alcub.Spec.Capacity),
+				VolumeId:      alcub.Spec.Uuid,
+				CapacityBytes: int64(alcub.Spec.Capacity),
 				VolumeContext: req.GetParameters(),
 				ContentSource: req.GetVolumeContentSource(),
 			},
@@ -74,15 +74,16 @@ func (c *Controller) CreateVolume(ctx context.Context,req *csi.CreateVolumeReque
 
 	volumeID := uuid.NewUUID().String()
 	//TODO add volume id into volumeContext and check by node
-	_,err := c.createVolume(req.GetParameters(), req.GetName(), volumeID,capacity)
-	if err!=nil{
+	_, err := c.createVolume(req.GetParameters(), req.GetName(), volumeID, capacity)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create volume %v, %v", volumeID, err)
 	}
-	//TODO Requist is first or not, and both add to topology?
-	if accessReq := req.GetAccessibilityRequirements(); accessReq!=nil {
-		if accessReq.Requisite!=nil {
+
+	//TODO both add to topology?
+	if accessReq := req.GetAccessibilityRequirements(); accessReq != nil {
+		if accessReq.Requisite != nil {
 			topologies = accessReq.Requisite
-		}else if accessReq.Preferred!=nil{
+		} else if accessReq.Preferred != nil {
 			topologies = accessReq.Preferred
 		}
 	}
@@ -101,65 +102,65 @@ func (c *Controller) CreateVolume(ctx context.Context,req *csi.CreateVolumeReque
 // check cr exist
 // cr status is ready to delete
 // delete image and cr now
-func (c *Controller) DeleteVolume(ctx context.Context,req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error){
+func (c *Controller) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
 	var (
 		volid = req.VolumeId
 	)
 	alcub := c.alcubControl.GetByUuid(volid)
-	if alcub==nil{
+	if alcub == nil {
 		klog.V(4).Infof("volume %v had deleted!", volid)
 		return &csi.DeleteVolumeResponse{}, nil
 	}
 	err := c.deleteVolume(alcub)
-	if err!= nil{
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete volume %v: %v", volid, err)
 	}
 	klog.V(4).Infof("volume %v successfully deleted", volid)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 
-func (c *Controller) ValidateVolumeCapabilities(context.Context, *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error){
+func (c *Controller) ValidateVolumeCapabilities(context.Context, *csi.ValidateVolumeCapabilitiesRequest) (*csi.ValidateVolumeCapabilitiesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (c *Controller) ControllerPublishVolume(context.Context, *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error){
+func (c *Controller) ControllerPublishVolume(context.Context, *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) ControllerUnpublishVolume(context.Context, *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error){
+func (c *Controller) ControllerUnpublishVolume(context.Context, *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
-func (c *Controller) ListVolumes(context.Context, *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error){
+func (c *Controller) ListVolumes(context.Context, *csi.ListVolumesRequest) (*csi.ListVolumesResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) GetCapacity(context.Context, *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error){
+func (c *Controller) GetCapacity(context.Context, *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) CreateSnapshot(context.Context, *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error){
+func (c *Controller) CreateSnapshot(context.Context, *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) DeleteSnapshot(context.Context, *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error){
+func (c *Controller) DeleteSnapshot(context.Context, *csi.DeleteSnapshotRequest) (*csi.DeleteSnapshotResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) ListSnapshots(context.Context, *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error){
+func (c *Controller) ListSnapshots(context.Context, *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) ControllerExpandVolume(context.Context, *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error){
+func (c *Controller) ControllerExpandVolume(context.Context, *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
-func (c *Controller) ControllerGetVolume(context.Context, *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error){
+func (c *Controller) ControllerGetVolume(context.Context, *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "")
 }
 
 func getControllerServiceCapabilities(cl []csi.ControllerServiceCapability_RPC_Type) []*csi.ControllerServiceCapability {
 	var csc []*csi.ControllerServiceCapability
 
-	for _, cap := range cl {
-		klog.Infof("Enabling controller service capability: %v", cap.String())
+	for _, cs := range cl {
+		klog.Infof("Enabling controller service capability: %v", cs.String())
 		csc = append(csc, &csi.ControllerServiceCapability{
 			Type: &csi.ControllerServiceCapability_Rpc{
 				Rpc: &csi.ControllerServiceCapability_RPC{
-					Type: cap,
+					Type: cs,
 				},
 			},
 		})

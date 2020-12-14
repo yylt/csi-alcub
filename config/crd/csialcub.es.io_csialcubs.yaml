@@ -8,6 +8,19 @@ metadata:
   creationTimestamp: null
   name: csialcubs.csialcub.es.io
 spec:
+  additionalPrinterColumns:
+  - JSONPath: .status.node
+    name: Node
+    type: string
+  - JSONPath: .status.prenode
+    name: PreNode
+    type: string
+  - JSONPath: .status.volumeInfo.devpath
+    name: Dev
+    type: string
+  - JSONPath: .status.volumeInfo.storageip
+    name: StorageIp
+    type: string
   group: csialcub.es.io
   names:
     kind: CsiAlcub
@@ -15,9 +28,9 @@ spec:
     plural: csialcubs
     singular: csialcub
   scope: Cluster
+  subresources: {}
   validation:
     openAPIV3Schema:
-      description: VirtualMachine is the Schema for the virtualmachines API
       properties:
         apiVersion:
           description: 'APIVersion defines the versioned schema of this representation
@@ -32,51 +45,48 @@ spec:
         metadata:
           type: object
         spec:
-          description: VirtualMachineSpec defines the desired state of VirtualMachine
           properties:
-            blockVolume:
-              description: is block volume
-              type: boolean
             capacity:
-              additionalProperties:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
               description: capacity
-              type: object
+              format: int64
+              type: integer
             image:
               type: string
             pool:
               description: alcub need pool and image, if not use alcub, pls add more
                 param.
               type: string
+            rbdStorageClass:
+              type: string
             uuid:
               type: string
           required:
-          - blockVolume
           - capacity
           - image
           - pool
+          - rbdStorageClass
           - uuid
           type: object
         status:
-          description: VirtualMachineStatus defines the observed state of VirtualMachine
           properties:
             node:
+              description: fill in the node which is now use the volume
               type: string
             prenode:
+              description: fill in the node name which is first attached
               type: string
             volumeInfo:
-              description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
-                of cluster Important: Run "make" to regenerate code after modifying
-                this file'
               properties:
                 devpath:
                   description: dev path, such as /dev/rbd1 .etc
                   type: string
+                storageip:
+                  type: string
               type: object
+            zone:
+              items:
+                type: string
+              type: array
           type: object
       type: object
   version: v1beta1

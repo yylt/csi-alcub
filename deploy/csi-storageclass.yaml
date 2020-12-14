@@ -4,7 +4,7 @@ metadata:
   name: csi-rbd
 parameters:
   # rbd storage class which fetch rbd params
-  rbdstorageclass: xxx
+  scname: xxx
 
 
 provisioner: alcub.csi.es.io

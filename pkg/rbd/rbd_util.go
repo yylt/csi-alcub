@@ -1,6 +1,5 @@
 package rbd
 
-
 import (
 	"context"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	klog "k8s.io/klog/v2"
+
+	"sigs.k8s.io/sig-storage-lib-external-provisioner/v6/util"
 )
 
 const (
@@ -27,17 +28,6 @@ var (
 
 type RBDUtil time.Duration
 
-const (
-	KiB int64 = 1024
-	MiB int64 = 1024 * KiB
-	GiB int64 = 1024 * MiB
-	TiB int64 = 1024 * GiB
-)
-
-func RoundUpSize(sizeBytes int64, unitBytes int64) int64 {
-	return (sizeBytes + unitBytes - 1) / unitBytes
-}
-
 func NewRbdUtil(du time.Duration) RBDUtil {
 	return RBDUtil(du)
 }
@@ -48,15 +38,15 @@ func (u RBDUtil) kernelRBDMonitorsOpt(mons []string) string {
 }
 
 // CreateImage creates a new ceph image with provision and volume options.
-func (u RBDUtil) CreateImage(pOpts *rbdProvisionOptions, image string,  bytessize int64) (*Volume, error) {
+func (u RBDUtil) CreateImage(pOpts *rbdProvisionOptions, image string, bytessize int64) (*Volume, error) {
 	var output []byte
 	var err error
 
 	volSizeBytes := bytessize
 	// convert to MB that rbd defaults on
-	sz := int(RoundUpSize(volSizeBytes, MiB))
+	sz := int(util.RoundUpSize(volSizeBytes, util.MiB))
 	if sz <= 0 {
-		return nil, fmt.Errorf("invalid storage '%s' requested for RBD provisioner, it must greater than zero", volSizeBytes)
+		return nil, fmt.Errorf("invalid volume size '%d' requested for RBD provisioner, it must greater than zero", volSizeBytes)
 	}
 	volSz := fmt.Sprintf("%d", sz)
 	// rbd create
@@ -129,7 +119,7 @@ func (u RBDUtil) rbdStatus(image string, pOpts *rbdProvisionOptions) (bool, erro
 }
 
 // DeleteImage deletes a ceph image with provision and volume options.
-func (u RBDUtil) DeleteImage(pOpts *rbdProvisionOptions,image string) error {
+func (u RBDUtil) DeleteImage(pOpts *rbdProvisionOptions, image string) error {
 	var output []byte
 	found, err := u.rbdStatus(image, pOpts)
 	if err != nil {
@@ -151,20 +141,20 @@ func (u RBDUtil) DeleteImage(pOpts *rbdProvisionOptions,image string) error {
 	return err
 }
 
-func (u RBDUtil) FetchUrl(pool, attr string) ([]byte,error){
-	if pool == "" || attr == ""{
-		return nil,fmt.Errorf("pool or attr not define")
+func (u RBDUtil) FetchUrl(pool, attr string) ([]byte, error) {
+	if pool == "" || attr == "" {
+		return nil, fmt.Errorf("pool or attr not define")
 	}
 	args := []string{"-p", pool, "getxattr", attr, "URL"}
 	return u.execCommand("rados", args)
 }
 
-func (u RBDUtil) AddBlackList(entityAddr string,id string) (error){
-	if entityAddr == "" || id == ""{
+func (u RBDUtil) AddBlackList(entityAddr string, id string) error {
+	if entityAddr == "" || id == "" {
 		return fmt.Errorf("pool or attr not define")
 	}
 	args := []string{"--id", id, "osd", "blacklist", "add", entityAddr}
-	output,err := u.execCommand("ceph", args)
+	output, err := u.execCommand("ceph", args)
 	if err == nil {
 		return nil
 	}
@@ -173,7 +163,7 @@ func (u RBDUtil) AddBlackList(entityAddr string,id string) (error){
 }
 
 func (u RBDUtil) execCommand(command string, args []string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(),time.Duration(u))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(u))
 	defer cancel()
 
 	// Create the command with our context
@@ -193,14 +183,13 @@ func (u RBDUtil) execCommand(command string, args []string) ([]byte, error) {
 	return out, err
 }
 
-
 //command: rados -p {pool} getxattr {attr} URL
-func FetchUrl(pool, attr string) ([]byte,error){
-	return defaultRbdUtil.FetchUrl(pool,attr)
+func FetchUrl(pool, attr string) ([]byte, error) {
+	return defaultRbdUtil.FetchUrl(pool, attr)
 }
 
 //commmand: ceph --id {id} osd blacklis add {ip}:0/0
-func AddBlackList(storageip net.IP,id string) error {
-	entityAddr := fmt.Sprintf("%s:0/0",storageip.String())
-	return defaultRbdUtil.AddBlackList(entityAddr,id)
+func AddBlackList(storageip net.IP, id string) error {
+	entityAddr := fmt.Sprintf("%s:0/0", storageip.String())
+	return defaultRbdUtil.AddBlackList(entityAddr, id)
 }

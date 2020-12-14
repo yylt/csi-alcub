@@ -7,17 +7,15 @@ endif
 all: build
 
 # Build binarys
-build: generate fmt vet prepare controller node
+build: generate fmt vet prepare csi
 
 prepare:
 	mkdir -p bin
 	cp config/crd/* bin/
 
-controller:
-	go build -o bin/controller cmd/controller/main.go
+csi:
+	go build -o bin/hyper cmd/main.go
 
-node:
-	go build -o bin/node cmd/node/main.go
 # Run go fmt against code
 fmt:
 	go fmt ./...

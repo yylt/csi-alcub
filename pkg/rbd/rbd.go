@@ -3,17 +3,18 @@ package rbd
 import (
 	"context"
 	"fmt"
+
 	"net"
 	"time"
 
 	"strings"
 
-	klog "k8s.io/klog/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"github.com/kubernetes-sigs/sig-storage-lib-external-provisioner/util"
+	"k8s.io/client-go/kubernetes"
+	klog "k8s.io/klog/v2"
+	"k8s.io/kubernetes/pkg/volume"
+	"sigs.k8s.io/sig-storage-lib-external-provisioner/v6/util"
 )
 
 var (
@@ -48,13 +49,12 @@ type rbdProvisionOptions struct {
 }
 
 type Volume struct {
-	Pool string
+	Pool  string
 	Image string
 }
 
-
 type Rbd struct {
-	ctx context.Context
+	ctx    context.Context
 	client kubernetes.Interface
 
 	rbdutil RBDUtil
@@ -64,14 +64,13 @@ type Rbd struct {
 
 // create/delete image function
 // NOTE: Only support storageclass v1
-func NewRbd(client kubernetes.Interface, createTimeout time.Duration, ) *Rbd {
+func NewRbd(client kubernetes.Interface, createTimeout time.Duration) *Rbd {
 	rbd := &Rbd{
-		client:client,
+		client:  client,
 		rbdutil: NewRbdUtil(createTimeout),
 	}
 	return rbd
 }
-
 
 func (r *Rbd) parseParameters(parameters map[string]string) (*rbdProvisionOptions, error) {
 	// options with default values
@@ -94,7 +93,7 @@ func (r *Rbd) parseParameters(parameters map[string]string) (*rbdProvisionOption
 			// Try to find DNS info in local cluster DNS so that the kubernetes
 			// host DNS config doesn't have to know about cluster DNS
 			if r.dnsip == "" {
-				r.dnsip = util.FindDNSIP(r.client)
+				r.dnsip = util.FindDNSIP(context.Background(), r.client)
 			}
 			klog.V(4).Infof("dnsip: %q\n", r.dnsip)
 			arr := strings.Split(v, ",")
@@ -204,31 +203,28 @@ func (r *Rbd) parsePVSecret(namespace, secretName string) (string, error) {
 	return secret, nil
 }
 
-func (r *Rbd) CreateImage(scname string, image string, bytesize int64) (*Volume,error){
+func (r *Rbd) CreateImage(scname string, image string, bytesize int64) (*Volume, error) {
 	ctx := context.Background()
-	sc, err := r.client.StorageV1().StorageClasses().Get(ctx,scname,metav1.GetOptions{})
-	if err!= nil {
+	sc, err := r.client.StorageV1().StorageClasses().Get(ctx, scname, metav1.GetOptions{})
+	if err != nil {
 		return nil, err
 	}
 	rbdoption, err := r.parseParameters(sc.Parameters)
-	if err!= nil {
+	if err != nil {
 		return nil, err
 	}
-	return r.rbdutil.CreateImage(rbdoption,image,bytesize)
+	return r.rbdutil.CreateImage(rbdoption, image, bytesize)
 }
 
 func (r *Rbd) DeleteImage(scname string, image string) error {
 	ctx := context.Background()
-	sc, err := r.client.StorageV1().StorageClasses().Get(ctx,scname,metav1.GetOptions{})
-	if err!= nil {
+	sc, err := r.client.StorageV1().StorageClasses().Get(ctx, scname, metav1.GetOptions{})
+	if err != nil {
 		return err
 	}
 	rbdoption, err := r.parseParameters(sc.Parameters)
-	if err!= nil {
+	if err != nil {
 		return err
 	}
-	return r.rbdutil.DeleteImage(rbdoption,image)
+	return r.rbdutil.DeleteImage(rbdoption, image)
 }
-
-
-
