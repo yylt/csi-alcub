@@ -1,15 +1,13 @@
 package controlrpc
 
 import (
+	"bytes"
 	"context"
-
+	"fmt"
 	corev1 "k8s.io/api/core/v1"
-	klog "k8s.io/klog/v2"
-	"strings"
-	"sync"
-
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/retry"
+	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,8 +15,8 @@ import (
 )
 
 const (
-	NodeAlcubLabelKey = "csi-alcub"
-	NodeAlcubLabelVal = "enable"
+//NodeAlcubLabelKey = "csi-alcub"
+//NodeAlcubLabelVal = "enable"
 )
 
 type updateNodeFn func(node *corev1.Node)
@@ -28,6 +26,10 @@ var (
 		Key:    corev1.TaintNodeUnreachable,
 		Effect: corev1.TaintEffectNoExecute,
 	}
+	//hosthaKv   = map[string]string{"hostha-maintain": "true"}
+	csiBlackKv = map[string]string{"csi-alcub-maintain": "true"}
+
+	tempNodeKey = "%N"
 )
 
 // label control: watch node labels which added {alcublabelpre}-{nodename}
@@ -39,23 +41,32 @@ type Node struct {
 	client  client.Client
 	manager *Controller
 
-	mu    sync.RWMutex
-	nodes map[string]struct{}
+	// the label updated to node,
+	// TODO(yy) only support one pair
+	csilabel map[string]string
 
-	stopmu   sync.RWMutex
-	nodestop map[string]struct{}
+	halabel map[string]string
 
-	// label key for filter
-	lableKeyPrefix string
+	// label key for filter, the key used as:
+	filterKey []byte
+
+	filtervalue []byte
 }
 
-func NewNode(mgr ctrl.Manager, alcubLabelkeyPrefix string) (*Node, error) {
+func NewNode(mgr ctrl.Manager, manager *Controller, filterKey, filtervalue []byte, halabel, csilabel map[string]string) (*Node, error) {
+	if csilabel == nil {
+		return nil, fmt.Errorf("label must not be nil!")
+	}
 	n := &Node{
-		ctx:            context.Background(),
-		client:         mgr.GetClient(),
-		lableKeyPrefix: alcubLabelkeyPrefix,
-		nodes:          make(map[string]struct{}),
-		nodestop:       make(map[string]struct{}),
+		ctx:       context.Background(),
+		client:    mgr.GetClient(),
+		filterKey: filterKey,
+
+		filtervalue: filtervalue,
+
+		halabel:  halabel,
+		manager:  manager,
+		csilabel: csilabel,
 	}
 	return n, n.probe(mgr)
 }
@@ -72,37 +83,50 @@ func (n *Node) labelController(labels map[string]string, nodename string) update
 		return nil
 	}
 	var (
-		alcubExist     string
+		alcubExist     bool
 		nodeLabelExist bool
 	)
+	tmpmap := map[string]string{tempNodeKey: nodename}
+	key := string(tempReplace(n.filterKey, tmpmap))
+	val := string(tempReplace(n.filtervalue, tmpmap))
 
-	for k, _ := range labels {
-		if strings.HasPrefix(k, n.lableKeyPrefix) {
-			alcubExist = k
+	klog.V(2).Infof("label controller filter label: %s=%s", key, val)
+	for k, v := range labels {
+		if key == k && val == v {
+			alcubExist = true
 		}
-	}
-	if _, ok := labels[NodeAlcubLabelKey]; ok {
-		nodeLabelExist = true
+
+		if _, ok := n.csilabel[k]; ok {
+			nodeLabelExist = true
+		}
 	}
 
 	// delete csi label
-	if alcubExist == "" {
-		klog.V(2).Infof("node labelkey not include keyprefix %s", n.lableKeyPrefix)
+	if !alcubExist {
+		klog.V(2).Infof("node %s is not alcub type!", nodename)
 		if !nodeLabelExist {
 			return nil
 		}
 		klog.Infof("csi labelkey exist, but node do not have alcub label")
-		return n.removeNode(nodename)
+		return func(node *corev1.Node) {
+			for k, _ := range n.csilabel {
+				delete(node.Labels, k)
+			}
+		}
 	}
 
 	// had add csi label
 	if nodeLabelExist {
 		return nil
 	}
-	return n.addNode(nodename)
+	return func(node *corev1.Node) {
+		for k, v := range n.csilabel {
+			node.Labels[k] = v
+		}
+	}
 }
 
-func (n *Node) notreadyController(node *corev1.Node) error {
+func (n *Node) notreadyController(node *corev1.Node) updateNodeFn {
 	if len(node.Spec.Taints) == 0 {
 		return nil
 	}
@@ -110,20 +134,36 @@ func (n *Node) notreadyController(node *corev1.Node) error {
 		nodeUnreach bool
 	)
 	for _, taint := range node.Spec.Taints {
+		//TODO(y) check Unreachable Taint maybe too late
 		if taint.MatchTaint(UnreachableTaintTemplate) {
 			nodeUnreach = true
 		}
 	}
 
-	if !nodeUnreach {
-		return nil
+	// check or update label
+	if nodeUnreach && !inMaps(node.Labels, csiBlackKv) {
+		err := n.manager.StopNode(node.Name, !inMaps(node.Labels, n.halabel))
+		if err != nil {
+			klog.Errorf("controller stop node failed: %v", err)
+			return nil
+		}
+		return func(node *corev1.Node) {
+			for k, v := range csiBlackKv {
+				node.Labels[k] = v
+			}
+		}
 	}
-	if _, ok := n.nodestop[node.Name]; ok {
-		return nil
-	}
-	err := n.manager.StopNode(node.Name)
-	if err == nil {
-		n.nodestop[node.Name] = struct{}{}
+	if !nodeUnreach && inMaps(node.Labels, csiBlackKv) {
+		err := n.manager.StartNode(node.Name, !inMaps(node.Labels, n.halabel))
+		if err != nil {
+			klog.Errorf("controller start node failed: %v", err)
+			return nil
+		}
+		return func(node *corev1.Node) {
+			for k, _ := range csiBlackKv {
+				delete(node.Labels, k)
+			}
+		}
 	}
 	return nil
 }
@@ -154,9 +194,9 @@ func (n *Node) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.
 	if fn != nil {
 		updateFns = append(updateFns, fn)
 	}
-	err = n.notreadyController(&node)
-	if err != nil {
-		klog.Errorf("notready controller failed nodename:%v, %v", req.Name, err)
+	fn = n.notreadyController(&node)
+	if fn != nil {
+		updateFns = append(updateFns, fn)
 	}
 	//TODO the node which beccome ready should remove blacklist
 	return ctrl.Result{}, err
@@ -182,20 +222,28 @@ func (n *Node) updateNode(req reconcile.Request, fns []updateNodeFn) {
 	})
 }
 
-func (n *Node) removeNode(nodename string) updateNodeFn {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	delete(n.nodes, nodename)
-	return func(node *corev1.Node) {
-		delete(node.Labels, NodeAlcubLabelKey)
+func inMaps(src map[string]string, kv map[string]string) bool {
+	if kv == nil || src == nil {
+		return false
 	}
+	for k, v := range kv {
+		if v0, ok := src[k]; ok {
+			if v0 == v {
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
-func (n *Node) addNode(nodename string) updateNodeFn {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.nodes[nodename] = struct{}{}
-	return func(node *corev1.Node) {
-		node.Labels[NodeAlcubLabelKey] = NodeAlcubLabelVal
+func tempReplace(src []byte, replaces map[string]string) []byte {
+	var tmp = src
+	for k, v := range replaces {
+		tmp = bytes.ReplaceAll(tmp, []byte(k), []byte(v))
 	}
+	if tmp == nil {
+		return []byte{}
+	}
+	return tmp
 }

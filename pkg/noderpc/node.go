@@ -2,12 +2,13 @@ package noderpc
 
 import (
 	"fmt"
+	"net"
+
 	alcubv1beta1 "github.com/yylt/csi-alcub/pkg/api/v1beta1"
 	"github.com/yylt/csi-alcub/pkg/manager"
 	rbd2 "github.com/yylt/csi-alcub/pkg/rbd"
 	"github.com/yylt/csi-alcub/pkg/store"
 	"github.com/yylt/csi-alcub/utils"
-	"net"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	klog "k8s.io/klog/v2"
@@ -17,6 +18,7 @@ var _ csi.NodeServer = &Node{}
 
 const (
 	TopologyKeyNode = "topology.alcub.csi/node"
+	defaultPerm     = 0750
 )
 
 type delfn func()
@@ -42,8 +44,8 @@ func NewNode(store store.Alcuber, alcubControl *manager.AlcubCon, rbd *rbd2.Rbd,
 		store:             store,
 		alcubControl:      alcubControl,
 		rbd:               rbd,
-		maxVolumesPerNode: 0,        //TODO now alcub is unlimit
-		nodeID:            nodename, //TODO ID should not be same with nodename
+		maxVolumesPerNode: 0, //TODO now alcub is unlimit
+		nodeID:            nodename,
 		nodename:          nodename,
 		storeip:           getStoraIfIp(storeifname),
 	}
@@ -165,6 +167,7 @@ func validAlcub(alcub *alcubv1beta1.CsiAlcub) error {
 func getStoraIfIp(storeifname string) string {
 	var ipaddr string
 	err := utils.LookupAddresses(func(name string, ip net.IP, ipmask net.IPMask) bool {
+		klog.V(4).Infof("Found net interface:%v, ip: %v", name, ip.String())
 		if name == storeifname {
 			ipaddr = ip.String()
 			return false

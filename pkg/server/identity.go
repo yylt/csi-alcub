@@ -27,21 +27,23 @@ func ControllerCapability() csi.PluginCapability_Service_Type {
 
 var _ csi.IdentityServer = &IdentityServer{}
 
-func NewIdenty(name string, caps ...csi.PluginCapability_Service_Type) (*IdentityServer, error) {
+func NewIdenty(drivername string, caps ...csi.PluginCapability_Service_Type) (*IdentityServer, error) {
 	if len(caps) == 0 {
 		return nil, fmt.Errorf("Capability must have one at least")
 	}
 	var identcaps = make([]*csi.PluginCapability, len(caps))
 	for i, v := range caps {
-		identcaps[i].Type = &csi.PluginCapability_Service_{
-			Service: &csi.PluginCapability_Service{
-				Type: v,
+		identcaps[i] = &csi.PluginCapability{
+			Type: &csi.PluginCapability_Service_{
+				Service: &csi.PluginCapability_Service{
+					Type: v,
+				},
 			},
 		}
 	}
 	return &IdentityServer{
 		caps:    identcaps,
-		name:    name,
+		name:    drivername,
 		version: version,
 	}, nil
 }

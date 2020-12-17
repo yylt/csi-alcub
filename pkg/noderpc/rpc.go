@@ -3,13 +3,14 @@ package noderpc
 import (
 	"context"
 	"fmt"
+	"os"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/klog"
+	klog "k8s.io/klog/v2"
 	utilexec "k8s.io/utils/exec"
 	"k8s.io/utils/mount"
-	"os"
 )
 
 func (c *Node) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
@@ -55,7 +56,7 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 
 	targetPath := req.GetTargetPath()
 	volid := req.GetVolumeId()
-	if req.GetVolumeCapability().GetMount() != nil {
+	if req.GetVolumeCapability().GetMount() == nil {
 		return nil, status.Error(codes.InvalidArgument, "only support mount access type")
 	}
 
@@ -84,7 +85,8 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	notMnt, reterr = mount.New("").IsLikelyNotMountPoint(targetPath)
 	if reterr != nil {
 		if os.IsNotExist(reterr) {
-			if reterr = os.MkdirAll(targetPath, 0750); reterr != nil {
+			klog.V(3).Infof("create dirpath %s wieh perm: %x", targetPath, defaultPerm)
+			if reterr = os.MkdirAll(targetPath, defaultPerm); reterr != nil {
 				return nil, status.Error(codes.Internal, reterr.Error())
 			}
 			notMnt = true
@@ -107,7 +109,7 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	klog.V(4).Infof("target %v\nfstype %v\nreadonly %v\nvolumeId %v\nattributes %v\nmountflags %v\n",
 		targetPath, fsType, readOnly, volid, attrib, mountFlags)
 
-	options := []string{"bind"}
+	options := []string{}
 	if readOnly {
 		options = append(options, "ro")
 	}
@@ -116,7 +118,7 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 		Exec:      utilexec.New(),
 	}
 
-	reterr = safemounter.FormatAndMount(devpath, targetPath, "", options)
+	reterr = safemounter.FormatAndMount(devpath, targetPath, fsType, options)
 	if reterr != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("failed to mount device: %s at %s: %v", devpath, targetPath, reterr))
 	}

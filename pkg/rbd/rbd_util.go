@@ -149,11 +149,19 @@ func (u RBDUtil) FetchUrl(pool, attr string) ([]byte, error) {
 	return u.execCommand("rados", args)
 }
 
-func (u RBDUtil) AddBlackList(entityAddr string, id string) error {
+func (u RBDUtil) BlackList(entityAddr string, id string, add bool) error {
 	if entityAddr == "" || id == "" {
 		return fmt.Errorf("pool or attr not define")
 	}
-	args := []string{"--id", id, "osd", "blacklist", "add", entityAddr}
+	var (
+		op string
+	)
+	if add {
+		op = "add"
+	} else {
+		op = "rm"
+	}
+	args := []string{"--id", id, "osd", "blacklist", op, entityAddr}
 	output, err := u.execCommand("ceph", args)
 	if err == nil {
 		return nil
@@ -191,5 +199,10 @@ func FetchUrl(pool, attr string) ([]byte, error) {
 //commmand: ceph --id {id} osd blacklis add {ip}:0/0
 func AddBlackList(storageip net.IP, id string) error {
 	entityAddr := fmt.Sprintf("%s:0/0", storageip.String())
-	return defaultRbdUtil.AddBlackList(entityAddr, id)
+	return defaultRbdUtil.BlackList(entityAddr, id, true)
+}
+
+func RmBlackList(storageip net.IP, id string) error {
+	entityAddr := fmt.Sprintf("%s:0/0", storageip.String())
+	return defaultRbdUtil.BlackList(entityAddr, id, false)
 }

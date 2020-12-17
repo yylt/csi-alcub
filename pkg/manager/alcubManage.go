@@ -4,22 +4,18 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-
-	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"k8s.io/klog"
 	"sync"
 
 	alcubv1beta1 "github.com/yylt/csi-alcub/pkg/api/v1beta1"
 	mtypes "github.com/yylt/csi-alcub/types"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	ctrl "sigs.k8s.io/controller-runtime"
-
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
+	klog "k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -29,14 +25,14 @@ var (
 )
 
 type Nodeinfo struct {
-	StoreIp net.IP
-	Nodes   []string
+	StoreIp  net.IP
+	NodeUrls []string
 }
 
 func (ni *Nodeinfo) DeepCopy() *Nodeinfo {
 	tmpn := &Nodeinfo{}
 	copy(tmpn.StoreIp, ni.StoreIp)
-	copy(tmpn.Nodes, ni.Nodes)
+	copy(tmpn.NodeUrls, ni.NodeUrls)
 	return tmpn
 }
 
@@ -139,7 +135,7 @@ func (al *AlcubCon) Create(name string, spec *alcubv1beta1.CsiAlcubSpec) error {
 			Name:       name,
 			Finalizers: finalizers,
 		},
-		Spec:   alcubv1beta1.CsiAlcubSpec{},
+		Spec:   *spec,
 		Status: alcubv1beta1.CsiAlcubStatus{},
 	}
 	reterr = al.client.Create(al.ctx, &newobj)
@@ -273,16 +269,16 @@ func (al *AlcubCon) reverseNode(stat *alcubv1beta1.CsiAlcubStatus) {
 	oldv, ok := al.nodes[stat.Node]
 	if !ok {
 		oldv = &Nodeinfo{
-			StoreIp: nil,
-			Nodes:   nil,
+			StoreIp:  nil,
+			NodeUrls: nil,
 		}
 	}
-	//TODO: check ip only
+	//TODO: check ip only enough?
 	if oldv.StoreIp.Equal(ip) {
 		return
 	}
 	oldv.StoreIp = ip
-	oldv.Nodes = stat.AllNodes
+	copy(oldv.NodeUrls, stat.AllNodes)
 	al.nodes[stat.Node] = oldv
 }
 

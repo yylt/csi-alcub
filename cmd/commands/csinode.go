@@ -29,7 +29,8 @@ func NewNodeCmd() *cobra.Command {
 			client := kubernetes.NewForConfigOrDie(kubeconfg)
 
 			mgr, err := ctrl.NewManager(kubeconfg, ctrl.Options{
-				Scheme: scheme,
+				Scheme:             scheme,
+				MetricsBindAddress: "0",
 			})
 			if err != nil {
 				klog.Error(err, "unable to set up overall controller manager")
@@ -46,11 +47,11 @@ func NewNodeCmd() *cobra.Command {
 
 			csiNode := noderpc.NewNode(s, alcubcon, rbd, nodename, storageIfName)
 
-			csiIdentify, err := server.NewIdenty(nodename, server.ControllerCapability())
+			csiIdentify, err := server.NewIdenty(drivername, server.ConstraCapability())
 			if err != nil {
 				return err
 			}
-			runner := utils.NewCobraRunner(false, endpoint, csiIdentify, nil, csiNode)
+			runner := utils.NewRunner(false, endpoint, csiIdentify, nil, csiNode)
 			err = mgr.Add(runner)
 			if err != nil {
 				return err
@@ -63,12 +64,11 @@ func NewNodeCmd() *cobra.Command {
 			return nil
 		},
 	}
-	flagset := cmd.LocalFlags()
+	flagset := cmd.PersistentFlags()
 
 	ApplyStore(flagset)
-	ApplyAlcubConf(flagset)
-	ApplyNodeName(flagset)
-	ApplyEndpoint(flagset)
+	ApplyNode(flagset)
+	ApplyCsiInfo(flagset)
 	ApplyStorageIfName(flagset)
 
 	return cmd

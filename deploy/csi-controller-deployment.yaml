@@ -1,0 +1,94 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: csi-alcub-controller
+  namespace: openstack
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      csi-app: csi-alcub-provisioner
+  template:
+    metadata:
+      labels:
+        csi-app: csi-alcub-provisioner
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: csi-app
+                      operator: In
+                      values:
+                        - csi-alcub-provisioner
+                topologyKey: kubernetes.io/hostname
+              weight: 10
+      #serviceAccountName: csi-provisioner
+      containers:
+        - name: controll
+          image: hub.easystack.io/csi-alcub/hyper:v21
+          args:
+            - "controller"
+            - "--driver-name=alcub.csi.es.io"
+            - "--v=5"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--node-name=$(KUBE_NODE_NAME)"
+            - "--filter-label=alcubierre-manager-%N=enabled"
+            - "--ha-maintain-label=hostha-maintain=true"
+            - "--csi-label=csi-alcub=enable"
+            - "--alcub-api-url=alcubierre"
+            - "--alcub-user=admin"
+            - "--alcub-password=alcubierre"
+            - "--alcub-pool-name=alcubierre_pool"
+            - "--leader-id=csi-alcub-con"
+            - "--leader-elect=true"
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi-alcub-con.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+            - name: ceph-etc
+              mountPath: /etc/ceph/ceph.conf
+              subPath: ceph.conf
+        - name: provision
+          image: hub.easystack.io/csi-provisor/external:v2
+          args:
+            - -v=5
+            - --csi-address=/csi/csi-alcub-con.sock
+            - --feature-gates=Topology=true
+            - --default-fstype=ext4
+          securityContext:
+            # This is necessary only for systems with SELinux, where
+            # non-privileged sidecar containers cannot access unix domain socket
+            # created by privileged CSI driver container.
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+        - name: attach
+          image: hub.easystack.io/csi/csi-attacher:v2
+          args:
+            - --v=5
+            - --csi-address=/csi/csi-alcub-con.sock
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+      volumes:
+        - name: ceph-etc
+          configMap:
+            name: ceph-etc
+            defaultMode: 0444
+        - emptyDir:
+          name: socket-dir

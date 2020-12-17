@@ -30,8 +30,8 @@
     - mounter负责挂载volume 到指定目录  
 
 #### storageClass: 
-- 是用户态的crd, 所谓用户态就是控制器是用户提供,k8s不做任何的事情,
-- 作用: 管理storageClass和pvc的关联关系, 并动态创建pv
+- 用户态crd(控制器是用户提供)
+- 作用: 管理storageClass和pvc的关联关系, 并动态增删pv
 - 相关项目
     - github.com/kubernetes-incubator/external-storage
     - github.com/kubernetes-sigs/sig-storage-lib-external-provisioner
@@ -42,8 +42,6 @@
 #### flexVolume
 - cli 使用方式
 - 提供attach/mount等操作
-- 缺点:
-    - 需要主机权限
     
 #### csi volume
 - 实现Attacher/Detacher,Mounter/Umounter, BlockMapper/BlockUnmapper 这些接口
@@ -74,13 +72,15 @@
     - 节点 topology 的检查和节点选择 (默认不开启)
         - rr调度
 
+#### 绑定
+- 依赖外部项目[external-attacher](https://github.com/kubernetes-csi/external-attacher/)
 
 ## 高性能低时延
 ### 参考文档
 - https://wiki.easystack.cn/index.php/%E9%AB%98%E6%80%A7%E8%83%BD%E4%BD%8E%E6%97%B6%E5%BB%B6%E9%85%8D%E7%BD%AE%E5%8C%85%E7%94%B3%E8%AF%B7%E6%B5%81%E7%A8%8B
     - 高性能 对接包制作 (提供信息: 节点组, 网卡信息, master节点信息)
-- drbd + escache 方案 (陈亮组)
-    - 持久话cache (nvme)
+- drbd + escache 方案 (存储组)
+    - 持久cache (nvme)
     - drbd (kernel network sync)
     - 要求是三个节点一组
     - 提供api(python), 要求在调api时,需要pool, image参数 

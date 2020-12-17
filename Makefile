@@ -4,10 +4,12 @@ else
 GOBIN=$(shell go env GOBIN)
 endif
 
+iv ?= v1
+
 all: build
 
 # Build binarys
-build: generate fmt vet prepare csi
+build: fmt vet prepare csi
 
 prepare:
 	mkdir -p bin
@@ -23,6 +25,9 @@ fmt:
 # Run go vet against code
 vet:
 	go vet ./...
+
+dbg-image:
+	buildctl b  --frontend dockerfile.v0 --local context=. --local dockerfile=. -o type=image,name=hub.easystack.io/csi-alcub/hyper:$(iv),push=true
 
 # Generate code
 generate: controller-gen

@@ -79,9 +79,10 @@ CSINodeInfo=true|false (BETA - default=true)
 - 借助 pluginManager 管理 , 扫描的默认目录是 
     - /var/lib/kubelet/plugins_registry
     - /var/lib/kubelet/plugins (将被弃用)  
-- 目前在kubelet初始化时只增加两种pluginhandler
+- kubelet初始化时只增加两种pluginhandler
     - csi
     - device (GPU、NIC、FPGA、InfiniBand等设备)
+    
 ### pluginManager
 - desiredStateOfWorldPopulator(dsowp): 控制器用于监听文件变化,并更新dsow
 - reconciler: 同步dsow到asow, 并根据asow来处理操作
@@ -90,7 +91,7 @@ CSINodeInfo=true|false (BETA - default=true)
 - 重点说下operationGenerator中的操作,目前只提供注册和注销两个方法创建
 
 #### plugin 注册和注销
-- 使用grpc链接sock文件,并调用GetInfo方法获取respInfo信息
+- (grpc)调用GetInfo方法获取respInfo信息
 - 根据type类型查询handler
 - 调用handler的ValidatePlugin和RegisterPlugin 方法
 
@@ -107,6 +108,5 @@ Name string //对于csi,是CSIDriverRegistry中的name
 Endpoint string //用于重分配服务地址,默认是socketPath
 SupportedVersions []string
 }
-
 ```
     

@@ -110,24 +110,24 @@ func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, h
 }
 
 type Runner struct {
-	server     *nonBlockingGRPCServer
-	endpoint   string
-	ids        csi.IdentityServer
-	cs         csi.ControllerServer
-	ns         csi.NodeServer
-	userleader bool
+	server       *nonBlockingGRPCServer
+	endpoint     string
+	ids          csi.IdentityServer
+	cs           csi.ControllerServer
+	ns           csi.NodeServer
+	leaderenable bool
 
 	stopch <-chan struct{}
 }
 
-func NewCobraRunner(useleader bool, endpoint string, ids csi.IdentityServer, cs csi.ControllerServer, ns csi.NodeServer) *Runner {
+func NewRunner(leaderenable bool, endpoint string, ids csi.IdentityServer, cs csi.ControllerServer, ns csi.NodeServer) *Runner {
 	return &Runner{
-		server:     NewNonBlockingGRPCServer(),
-		endpoint:   endpoint,
-		ids:        ids,
-		cs:         cs,
-		ns:         ns,
-		userleader: useleader,
+		server:       NewNonBlockingGRPCServer(),
+		endpoint:     endpoint,
+		ids:          ids,
+		cs:           cs,
+		ns:           ns,
+		leaderenable: leaderenable,
 	}
 }
 
@@ -147,5 +147,5 @@ func (r *Runner) Start(ctx context.Context) error {
 }
 
 func (r *Runner) NeedLeaderElection() bool {
-	return r.userleader
+	return r.leaderenable
 }

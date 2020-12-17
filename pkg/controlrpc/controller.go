@@ -2,12 +2,15 @@ package controlrpc
 
 import (
 	"fmt"
-	"github.com/container-storage-interface/spec/lib/go/csi"
+	"strings"
+
 	alcubv1beta1 "github.com/yylt/csi-alcub/pkg/api/v1beta1"
 	"github.com/yylt/csi-alcub/pkg/manager"
 	rbd2 "github.com/yylt/csi-alcub/pkg/rbd"
 	"github.com/yylt/csi-alcub/pkg/store"
-	"k8s.io/klog"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	klog "k8s.io/klog/v2"
 )
 
 var _ csi.ControllerServer = &Controller{}
@@ -17,8 +20,8 @@ var (
 )
 
 type Controller struct {
-	store        store.Alcuber
-	nodeControl  *Node
+	store store.Alcuber
+
 	alcubControl *manager.AlcubCon
 	//Node resource store
 	rbd *rbd2.Rbd
@@ -29,16 +32,16 @@ type Controller struct {
 	nodeID       string
 }
 
-func NewController(nodeid string, store store.Alcuber, alcubControl *manager.AlcubCon, nodeControl *Node, rbd *rbd2.Rbd) *Controller {
+func NewController(nodeid string, store store.Alcuber, alcubControl *manager.AlcubCon, rbd *rbd2.Rbd) *Controller {
 	return &Controller{
 		rbd:          rbd,
 		nodeID:       nodeid,
 		store:        store,
 		alcubControl: alcubControl,
-		nodeControl:  nodeControl,
 		caps: getControllerServiceCapabilities(
 			[]csi.ControllerServiceCapability_RPC_Type{
 				csi.ControllerServiceCapability_RPC_CREATE_DELETE_VOLUME,
+				csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME,
 			}),
 	}
 }
@@ -46,10 +49,10 @@ func NewController(nodeid string, store store.Alcuber, alcubControl *manager.Alc
 // 1. add blacklist
 // 2. notify alcub server: node is not ready
 // called by node reconcile
-func (c *Controller) StopNode(nodename string) error {
+func (c *Controller) StopNode(nodename string, addblack bool) error {
 	var (
-		err      error
-		testNode string = nodename
+		err  error
+		errs strings.Builder
 	)
 	node := c.alcubControl.GetNodeInfo(nodename)
 	if node == nil {
@@ -58,32 +61,62 @@ func (c *Controller) StopNode(nodename string) error {
 	}
 
 	// add blacklist
-	err = rbd2.AddBlackList(node.StoreIp, fmt.Sprintf("csi-alcub-%s", c.nodeID))
-	if err != nil {
-		klog.Errorf("add blacklist on ipaddr %s fail: %v", node.StoreIp.String(), err)
-		return err
+	if addblack {
+		err = rbd2.AddBlackList(node.StoreIp, fmt.Sprintf("csi-alcub-%s", c.nodeID))
+		if err != nil {
+			klog.Errorf("add blacklist on ipaddr %s fail: %v", node.StoreIp.String(), err)
+			return err
+		}
 	}
-	for _, v := range node.Nodes {
+
+	c.alcubDynConf.Nodename = nodename
+
+	failfn := func(AlucbUrl string) error {
+		c.alcubDynConf.AlucbUrl = []byte(AlucbUrl)
+		return c.store.FailNode(&c.alcubDynConf, nodename)
+	}
+	for _, v := range node.NodeUrls {
 		if v == "" {
 			continue
 		}
-		if v != nodename {
-			testNode = nodename
+		if strings.Index(v, nodename) > 0 {
+			err = failfn(v)
+			if err != nil {
+				errs.WriteString(err.Error())
+				continue
+			}
 			break
 		}
 	}
-	c.alcubDynConf.Nodename = testNode
-	// notify store the node had been notready
-	err = c.store.FailNode(&c.alcubDynConf, nodename)
-	if err != nil {
-		klog.Errorf("notify store fail_node fail: %v", err)
-		return err
+	if errs.Len() != 0 {
+		klog.Errorf("notify store fail_node fail: %v", errs.String())
 	}
 	return nil
 }
 
+func (c *Controller) StartNode(nodename string, rmblack bool) error {
+	var (
+		err error
+	)
+	node := c.alcubControl.GetNodeInfo(nodename)
+	if node == nil {
+		klog.Errorf("no found storage ip on node %s", nodename)
+		return fmt.Errorf("not found")
+	}
+	if rmblack {
+		// remove blacklist
+		err = rbd2.RmBlackList(node.StoreIp, fmt.Sprintf("csi-alcub-%s", c.nodeID))
+		if err != nil {
+			klog.Errorf("remove blacklist on ipaddr %s fail: %v", node.StoreIp.String(), err)
+			return err
+		}
+	}
+	//TODO Store should start ?
+	return nil
+}
+
 func (c *Controller) deleteVolume(alcub *alcubv1beta1.CsiAlcub) error {
-	err := c.rbd.DeleteImage(alcub.Spec.Pool, alcub.Spec.Image)
+	err := c.rbd.DeleteImage(alcub.Spec.RbdSc, alcub.Spec.Image)
 	if err != nil {
 		klog.Errorf("delete image failed:%v", err)
 		return err
