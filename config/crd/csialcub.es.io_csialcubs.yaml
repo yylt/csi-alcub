@@ -1,0 +1,102 @@
+
+---
+apiVersion: apiextensions.k8s.io/v1beta1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.2.5
+  creationTimestamp: null
+  name: csialcubs.csialcub.es.io
+spec:
+  additionalPrinterColumns:
+  - JSONPath: .status.node
+    name: Node
+    type: string
+  - JSONPath: .status.prenode
+    name: PreNode
+    type: string
+  - JSONPath: .status.volumeInfo.devpath
+    name: Dev
+    type: string
+  - JSONPath: .status.volumeInfo.storageip
+    name: StorageIp
+    type: string
+  group: csialcub.es.io
+  names:
+    kind: CsiAlcub
+    listKind: CsiAlcubList
+    plural: csialcubs
+    singular: csialcub
+  scope: Cluster
+  subresources: {}
+  validation:
+    openAPIV3Schema:
+      properties:
+        apiVersion:
+          description: 'APIVersion defines the versioned schema of this representation
+            of an object. Servers should convert recognized schemas to the latest
+            internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+          type: string
+        kind:
+          description: 'Kind is a string value representing the REST resource this
+            object represents. Servers may infer this from the endpoint the client
+            submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+          type: string
+        metadata:
+          type: object
+        spec:
+          properties:
+            capacity:
+              description: capacity
+              format: int64
+              type: integer
+            image:
+              type: string
+            pool:
+              description: alcub need pool and image, if not use alcub, pls add more
+                param.
+              type: string
+            rbdStorageClass:
+              type: string
+            uuid:
+              type: string
+          required:
+          - capacity
+          - image
+          - pool
+          - rbdStorageClass
+          - uuid
+          type: object
+        status:
+          properties:
+            node:
+              description: fill in the node which is now use the volume
+              type: string
+            prenode:
+              description: fill in the node name which is first attached
+              type: string
+            volumeInfo:
+              properties:
+                devpath:
+                  description: dev path, such as /dev/rbd1 .etc
+                  type: string
+                storageip:
+                  type: string
+              type: object
+            zone:
+              items:
+                type: string
+              type: array
+          type: object
+      type: object
+  version: v1beta1
+  versions:
+  - name: v1beta1
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ""
+    plural: ""
+  conditions: []
+  storedVersions: []

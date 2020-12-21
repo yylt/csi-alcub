@@ -1,0 +1,99 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-alcub-node
+  namespace: openstack
+spec:
+  selector:
+    matchLabels:
+      app: csi-alcub-node
+  template:
+    metadata:
+      labels:
+        app: csi-alcub-node
+    spec:
+      nodeSelector:
+        csi-alcub: enable
+      hostNetwork: true
+      containers:
+        - name: node
+          image: hub.easystack.io/csi-alcub/hyper:v11
+          args:
+            - "node"
+            - "--driver-name=alcub.csi.es.io"
+            - "--v=5"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--node-name=$(KUBE_NODE_NAME)"
+            - "--alcub-api-url=alcubierre"
+            - "--alcub-user=admin"
+            - "--alcub-password=alcubierre"
+            - "--alcub-pool-name=alcubierre_pool"
+            - "--storage-if-name=br-storagepub"
+          env:
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+            - name: ceph-etc
+              mountPath: /etc/ceph/ceph.conf
+              subPath: ceph.conf
+            - mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+              name: mountpoint-dir
+            - mountPath: /var/lib/kubelet/plugins
+              mountPropagation: Bidirectional
+              name: plugins-dir
+            - mountPath: /dev
+              name: dev-dir
+        - name: registry
+          image: hub.easystack.io/csi/csi-node-regist:v1
+          args:
+            - --v=5
+            - --csi-address=/csi/csi.sock
+            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-alcub/csi.sock
+          securityContext:
+            privileged: true
+          env:
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - mountPath: /csi
+              name: socket-dir
+            - mountPath: /registration
+              name: registration-dir
+      volumes:
+        - hostPath:
+            path: /var/lib/kubelet/plugins/csi-alcub
+            type: DirectoryOrCreate
+          name: socket-dir
+        - hostPath:
+            path: /var/lib/kubelet/pods
+            type: DirectoryOrCreate
+          name: mountpoint-dir
+        - hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+          name: registration-dir
+        - hostPath:
+            path: /var/lib/kubelet/plugins
+            type: Directory
+          name: plugins-dir
+        - hostPath:
+            path: /dev
+            type: Directory
+          name: dev-dir
+        - name: ceph-etc
+          configMap:
+            name: ceph-etc
+            defaultMode: 0444

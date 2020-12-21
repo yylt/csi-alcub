@@ -1,0 +1,9 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: csi-alcub-sc
+parameters:
+  # rbd storage class which fetch rbd params
+  scname: general
+provisioner: alcub.csi.es.io
+reclaimPolicy: Delete
