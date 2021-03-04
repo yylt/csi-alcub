@@ -6,6 +6,10 @@ endif
 
 iv ?= v1
 
+NAME = csi-alcub
+PROJECT = github.com/yylt/csi-alcub
+PROJECT_DIR = $(GOPATH)/src/github.com/yylt
+
 all: build
 
 # Build binarys
@@ -50,27 +54,3 @@ CONTROLLER_GEN=$(GOBIN)/controller-gen
 else
 CONTROLLER_GEN=$(shell which controller-gen)
 endif
-
-
-.PHONY: copy-csi-alcub
-copy-csi-alcub: prepare
-	@export GO111MODULE=off
-	@export GOPROXY="https://goproxy.cn,direct"
-	@export PATH=$(GOBIN):$(PATH)
-	@mkdir -p $(GOPATH)/src/yylt
-	@cp -r $(shell command pwd;) $(GOPATH)/src/yylt
-	@cd "$(GOPATH)/src/yylt/csi-alcub"
-	@go build -o bin/hyper cmd/main.go
-	@echo "$(GOPATH)/src/yylt/csi-alcub/bin/hyper"
-
-.PHONY: test-style
-test-style:
-	@echo "TODO"
-
-.PHONY: test-unit
-test-unit:
-	@echo "TODO"
-
-.PHONY: coverage
-coverage:
-	@echo "TODO"

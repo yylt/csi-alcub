@@ -101,7 +101,6 @@ func (r *Rbd) parseParameters(parameters map[string]string) (*rbdProvisionOption
 					var lookup []string
 					if lookup, err = util.LookupHost(mhost, r.dnsip); err == nil {
 						for _, a := range lookup {
-							klog.V(1).Infof("adding %+v from mon lookup\n", a)
 							opts.monitors = append(opts.monitors, util.JoinHostPort(a, mport))
 						}
 					} else {

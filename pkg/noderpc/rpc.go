@@ -18,9 +18,7 @@ func (c *Node) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabili
 		Capabilities: []*csi.NodeServiceCapability{
 			{
 				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
-					},
+					Rpc: &csi.NodeServiceCapability_RPC{},
 				},
 			},
 		},
@@ -64,6 +62,7 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	if alcub == nil {
 		return nil, status.Error(codes.NotFound, fmt.Sprintf("not found resource by uuid %v", volid))
 	}
+
 	//prepare volume
 	devpath, failedfn, successfn, err := c.preMountValid(alcub)
 	if err != nil {
@@ -85,7 +84,7 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	notMnt, reterr = mount.New("").IsLikelyNotMountPoint(targetPath)
 	if reterr != nil {
 		if os.IsNotExist(reterr) {
-			klog.V(3).Infof("create dirpath %s wieh perm: %x", targetPath, defaultPerm)
+			klog.V(2).Infof("create dir path %s with perm: %x", targetPath, defaultPerm)
 			if reterr = os.MkdirAll(targetPath, defaultPerm); reterr != nil {
 				return nil, status.Error(codes.Internal, reterr.Error())
 			}
@@ -106,13 +105,15 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 	attrib := req.GetVolumeContext()
 	mountFlags := req.GetVolumeCapability().GetMount().GetMountFlags()
 
-	klog.V(4).Infof("target %v\nfstype %v\nreadonly %v\nvolumeId %v\nattributes %v\nmountflags %v\n",
-		targetPath, fsType, readOnly, volid, attrib, mountFlags)
+	klog.V(2).Infof("dev %v\ttargetPath %v\tfstype %v\treadonly %v",
+		devpath, targetPath, fsType, readOnly)
+	klog.V(4).Infof("volumeId %v\tmountflags %vattributes %v", volid, mountFlags, attrib)
 
 	options := []string{}
 	if readOnly {
 		options = append(options, "ro")
 	}
+
 	safemounter := mount.SafeFormatAndMount{
 		Interface: mount.New(""),
 		Exec:      utilexec.New(),
@@ -129,7 +130,8 @@ func (c *Node) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolume
 func (c *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (resp *csi.NodeUnpublishVolumeResponse, reterr error) {
 	// Check arguments
 	var (
-		err error
+		err    error
+		notMnt bool
 	)
 	if len(req.GetVolumeId()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing in request")
@@ -162,13 +164,13 @@ func (c *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 		}
 	}()
 	// Unmount only if the target path is really a mount point.
-	if notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-		err = nil
-	} else if !notMnt {
+	notMnt, err = mount.IsNotMountPoint(mount.New(""), targetPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if !notMnt {
 		// Unmounting the image or filesystem.
+		klog.V(2).Infof("start unmount targetPath: %v", targetPath)
 		err = mount.New("").Unmount(targetPath)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
@@ -179,7 +181,7 @@ func (c *Node) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVo
 	if err = os.RemoveAll(targetPath); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	klog.V(4).Infof("hostpath: volume %s has been unpublished.", targetPath)
+	klog.V(2).Infof("targetPath %s has been unpublished.", targetPath)
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }

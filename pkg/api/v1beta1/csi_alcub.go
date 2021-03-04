@@ -11,8 +11,8 @@ type CsiAlcubSpec struct {
 	RbdSc    string `json:"rbdStorageClass"`
 	// alcub need pool and image,
 	// if not use alcub, pls add more param.
-	Pool  string `json:"pool"`
-	Image string `json:"image"`
+	Pool  string `json:"rbd_pool"`
+	Image string `json:"rbd_image"`
 }
 
 type VolumeInfo struct {

@@ -2,11 +2,12 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
-	"sync"
+	"time"
 
 	rbd2 "github.com/yylt/csi-alcub/pkg/rbd"
 	"github.com/yylt/csi-alcub/utils"
@@ -17,7 +18,7 @@ import (
 
 var _ Alcuber = &client{}
 
-var (
+const (
 	resource = "dev"
 	devpath  = "/dev"
 )
@@ -27,9 +28,6 @@ var (
 		"content-type": []string{"application/json"},
 		"Accept":       []string{"application/json"},
 	}
-	bufpool = sync.Pool{New: func() interface{} {
-		return new(bytes.Buffer)
-	}}
 )
 
 type AlcubConf struct {
@@ -54,19 +52,22 @@ type client struct {
 	dynConf *DynConf
 }
 
-func NewClient(alcubConf *AlcubConf, dynconf *DynConf) *client {
+func NewClient(alcubConf *AlcubConf, dynconf *DynConf, conntimeout time.Duration) *client {
 	if alcubConf == nil || alcubConf.ApiUrl == "" {
 		panic("alcub configure must not be nil and apiurl must not be nil")
 	}
+	reqcli := req.New()
+	reqcli.SetTimeout(conntimeout)
 	cli := &client{
-		cli:     req.New(),
+		cli:     reqcli,
 		conf:    alcubConf,
 		dynConf: dynconf,
 	}
 	if cli.dynConf != nil {
 		err := cli.fillAlcubUrl(cli.dynConf)
 		if err != nil {
-			panic(err)
+			//panic(err)
+			klog.Errorf("fetch alcuburl failed:%v", err)
 		}
 	}
 	return cli
@@ -74,13 +75,13 @@ func NewClient(alcubConf *AlcubConf, dynconf *DynConf) *client {
 
 func (c *client) DoConn(conf *DynConf, pool, image string) (string, error) {
 	var (
-		reterr error
+		reterr   error
+		httpcode int
 	)
 	var devbody = struct {
 		Dev string `json:"alcubierre_dev"`
 	}{}
-	reterr = c.do(conf, func(buf *bytes.Buffer, au http.Header) error {
-
+	reterr = c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
 		data := map[string]interface{}{
 			"op": "dev_connect",
 			"op_args": map[string]string{
@@ -88,25 +89,37 @@ func (c *client) DoConn(conf *DynConf, pool, image string) (string, error) {
 				"image": image,
 			},
 		}
+		klog.V(5).Infof("start do connect alcubierre server")
 		resp, err := c.cli.Post(buf.String(), au, defaultHeader, req.BodyJSON(data))
-
-		klog.V(4).Infof("do connect done,resp:%v err:%v", resp, err)
 		if err != nil {
+			klog.Errorf("do connect failed:%v, data:%v", err, data)
 			return err
 		}
-		return resp.ToJSON(&devbody)
+
+		if resp != nil && resp.Response() != nil {
+			httpcode = resp.Response().StatusCode
+			err = resp.ToJSON(&devbody)
+			if err != nil {
+				klog.Errorf("resp body toJson failed: %v", err)
+			}
+		}
+		klog.V(2).Infof("do connect done, data:%v, code: %v, dev: %v", data, httpcode, devbody.Dev)
+		return err
 	})
 	if reterr != nil {
 		return "", reterr
 	}
-
+	if devbody.Dev == "" {
+		return "", fmt.Errorf("not found device on alcubierre_dev")
+	}
 	return path.Join(devpath, devbody.Dev), nil
 }
 
 func (c *client) DoDisConn(conf *DynConf, pool, image string) error {
-
-	return c.do(conf, func(buf *bytes.Buffer, au http.Header) error {
-
+	var errbody = struct {
+		Serr string `json:"error,omitempty"`
+	}{}
+	return c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
 		data := map[string]interface{}{
 			"op": "dev_disconnect",
 			"op_args": map[string]string{
@@ -114,19 +127,31 @@ func (c *client) DoDisConn(conf *DynConf, pool, image string) error {
 				"image": image,
 			},
 		}
+		klog.V(5).Infof("start do disconnect alcubierre server")
 		resp, err := c.cli.Post(buf.String(), au, defaultHeader, req.BodyJSON(data))
-
-		klog.V(4).Infof("do disconnect done,resp:%v err:%v", resp, err)
 		if err != nil {
+			klog.Errorf("do disconnect failed: %v", err)
 			return err
 		}
+
+		httpcode := resp.Response().StatusCode
+		// response body maybe null, but it is successs
+		resp.ToJSON(&errbody)
+
+		klog.V(2).Infof("do disconnect done, data:%v, code:%d, resp:%v", data, httpcode, resp.String())
+
+		if errbody.Serr != "" {
+			klog.Errorf("do disconnect failed: %v", errbody.Serr)
+			return errors.New(errbody.Serr)
+		}
+
 		return nil
 	})
 }
 
 func (c *client) FailNode(conf *DynConf, node string) error {
 
-	return c.do(conf, func(buf *bytes.Buffer, au http.Header) error {
+	return c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
 
 		data := map[string]interface{}{
 			"op": "node_fail",
@@ -134,9 +159,10 @@ func (c *client) FailNode(conf *DynConf, node string) error {
 				"node": node,
 			},
 		}
+		klog.V(5).Infof("start fail node from alcub: %v", data)
 		resp, err := c.cli.Post(buf.String(), au, defaultHeader, req.BodyJSON(data))
 
-		klog.V(4).Infof("fail node done,resp:%v err:%v", resp, err)
+		klog.V(2).Infof("fail node done,resp:%v err:%v", resp, err)
 		if err != nil {
 			return err
 		}
@@ -145,7 +171,7 @@ func (c *client) FailNode(conf *DynConf, node string) error {
 }
 
 func (c *client) DevStop(conf *DynConf, pool, image string) error {
-	return c.do(conf, func(buf *bytes.Buffer, au http.Header) error {
+	return c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
 
 		data := map[string]interface{}{
 			"op": "dev_stop",
@@ -154,9 +180,10 @@ func (c *client) DevStop(conf *DynConf, pool, image string) error {
 				"image": image,
 			},
 		}
+		klog.V(5).Infof("start dev stop from alcub")
 		resp, err := c.cli.Post(buf.String(), au, defaultHeader, req.BodyJSON(data))
 
-		klog.V(4).Infof("dev stop done,resp:%v err:%v", resp, err)
+		klog.V(2).Infof("dev stop done,resp:%v err:%v", resp, err)
 		if err != nil {
 			return err
 		}
@@ -164,27 +191,77 @@ func (c *client) DevStop(conf *DynConf, pool, image string) error {
 	})
 }
 
-func (c *client) GetNode(conf *DynConf, node string) ([]string, error) {
+// GetImageStatus
+// return isclear
+func (c *client) GetImageStatus(conf *DynConf, pool, image string) bool {
+
+	var clearbody = struct {
+		Status string `json:"status,omitempty"`
+	}{}
+	reterr := c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
+		data := map[string]interface{}{
+			"pool":  pool,
+			"image": image,
+		}
+		resp, err := c.cli.Get(buf.String(), au, defaultHeader, req.BodyJSON(data))
+		if err != nil {
+			klog.Errorf("Get image(%s) status failed:%v", image, err)
+			return err
+		}
+		klog.V(2).Infof("Get image status done, data:%v, resp:%v", data, resp.String())
+		err = resp.ToJSON(&clearbody)
+		if err != nil {
+			klog.Errorf("To json data failed:%v", err)
+			return err
+		}
+
+		return nil
+	})
+	if reterr != nil {
+		return false
+	}
+	if clearbody.Status == "" || clearbody.Status == "clean" {
+		return true
+	}
+	return false
+}
+
+// Actually getNode fetch other nodes alcub Url
+// so add local alcuburl into nodes
+func (c *client) GetNode(conf *DynConf, nodename string) ([]string, error) {
 	var (
 		nodes  []string
 		reterr error
 	)
-	reterr = c.do(conf, func(buf *bytes.Buffer, au http.Header) error {
+	reterr = c.do(conf, func(buf *bytes.Buffer, au http.Header, dc *DynConf) error {
 
 		data := map[string]interface{}{
 			"op": "get_secondary_urls",
 			"op_args": map[string]string{
-				"node": node,
+				"node": nodename,
 			},
 		}
-
+		klog.V(5).Infof("start get node from alcub")
 		resp, err := c.cli.Post(buf.String(), au, defaultHeader, req.BodyJSON(data))
 
-		klog.V(4).Infof("Get node done,resp:%v err:%v", resp, err)
 		if err != nil {
+			klog.Errorf("Get node failed:%v", err)
 			return err
 		}
-		return resp.ToJSON(&nodes)
+
+		err = resp.ToJSON(&nodes)
+		if err != nil {
+			klog.Errorf("To json data faield:%v", err)
+			return err
+		}
+		alcubu, err := url.Parse(string(dc.AlucbUrl))
+		if err != nil {
+			return nil
+		}
+		//TODO evict same node
+		nodes = append(nodes, string(utils.Combine(alcubu.Scheme, "://", alcubu.Host)))
+		klog.V(4).Infof("Get all node: %v", nodes)
+		return nil
 	})
 	if reterr != nil {
 		return nil, reterr
@@ -192,7 +269,7 @@ func (c *client) GetNode(conf *DynConf, node string) ([]string, error) {
 	return nodes, nil
 }
 
-func (c *client) do(dynconf *DynConf, fn func(buf *bytes.Buffer, au http.Header) error) error {
+func (c *client) do(dynconf *DynConf, fn func(buf *bytes.Buffer, au http.Header, c *DynConf) error) error {
 	var (
 		auth  http.Header
 		err   error
@@ -208,7 +285,7 @@ func (c *client) do(dynconf *DynConf, fn func(buf *bytes.Buffer, au http.Header)
 	}
 
 	if len(dconf.AlucbUrl) == 0 {
-		err = c.fillAlcubUrl(dynconf)
+		err = c.fillAlcubUrl(dconf)
 		if err != nil {
 			return err
 		}
@@ -220,14 +297,11 @@ func (c *client) do(dynconf *DynConf, fn func(buf *bytes.Buffer, au http.Header)
 	if err != nil {
 		return err
 	}
-	buf := bufpool.Get().(*bytes.Buffer)
-	buf.Reset()
-	//TODO: optimise
-	buf.WriteString(fmt.Sprintf("%s://", dst.Scheme))
+	buf := utils.GetBuf()
+	buf.Write(utils.Combine(dst.Scheme, "://"))
 	buf.WriteString(path.Join(dst.Host, c.conf.ApiUrl, resource))
-
-	err = fn(buf, auth)
-	bufpool.Put(buf)
+	err = fn(buf, auth, dconf)
+	utils.PutBuf(buf)
 
 	return err
 }

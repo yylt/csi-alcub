@@ -7,18 +7,20 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"strings"
+	"time"
 )
 
 var (
-	scheme         = runtime.NewScheme()
-	storeConf      = store.AlcubConf{}
-	nodename       string
-	leader         = &leaderInfo{}
-	labels         = &labelkv{}
-	alcubKeyPrefix string
-	drivername     string
-	endpoint       string
-	storageIfName  string
+	scheme    = runtime.NewScheme()
+	storeConf = store.AlcubConf{}
+	nodename  string
+	leader    = &leaderInfo{}
+	labels    = &labelkv{}
+
+	alcubconntimeout time.Duration
+	drivername       string
+	endpoint         string
+	storageIfName    string
 )
 
 type labelkv struct {
@@ -37,6 +39,7 @@ func ApplyStore(flagset *flag.FlagSet) {
 	flagset.StringVar(&storeConf.User, "alcub-user", "", "alucb username")
 	flagset.StringVar(&storeConf.Password, "alcub-password", "", "alcub password")
 	flagset.StringVar(&storeConf.AlucbPool, "alcub-pool-name", "", "alcub pool name")
+	flagset.DurationVar(&alcubconntimeout, "alcub-conn-timeout", 5*time.Minute, "alcub pool name")
 }
 
 func ApplyLeaderConf(flagset *flag.FlagSet) {

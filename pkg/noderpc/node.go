@@ -74,6 +74,7 @@ func (c *Node) attachDevice(alcub *alcubv1beta1.CsiAlcub) (string, error) {
 		klog.Errorf("attach path is null, spec: %v", alcub.Spec)
 		return "", fmt.Errorf("device path is null")
 	}
+	klog.V(2).Infof("dev connect success, devpath: %v", devpath)
 	return devpath, err
 }
 
@@ -91,24 +92,38 @@ func (c *Node) preMountValid(alcub *alcubv1beta1.CsiAlcub) (string, delfn, okfn,
 	)
 	// node is not null: the volume had mounted by other,
 	//  other node can not handler volume, because not ready , etc...
-	klog.V(2).Infof("in preMount, the status is %v, the nodename: %v", alcub.Status, c.nodename)
+	klog.V(2).Infof("in preMount, %s the volumeInfo is %v", alcub.Name, alcub.Status.VolumeInfo)
+	if alcub.Spec.Image == "" || alcub.Spec.Pool == "" {
+		klog.Errorf("csialcub(%s) image or pool is null", alcub.Name)
+		return "", nil, nil, fmt.Errorf("image or pool is null")
+	}
+
+	//check image is ready to use
+	if c.store.GetImageStatus(nil, alcub.Spec.Pool, alcub.Spec.Image) == false {
+		klog.Errorf("image(%v) pool(%v) is not ready", alcub.Spec.Pool, alcub.Spec.Image)
+		return "", nil, nil, fmt.Errorf("image(%s) status is not ready, wait clear", alcub.Spec.Image)
+	}
+
 	if alcub.Status.Node == "" {
 		okAttach = true
 	}
 	if alcub.Status.Node == c.nodename {
 		okAttach = true
 	}
-	if okAttach {
-		//TODO alcub server is idempotent?
-		nodes, err = c.store.GetNode(nil, c.nodename)
-		if err != nil {
-			return "", nil, nil, err
-		}
-		dev, err = c.attachDevice(alcub)
-		if err != nil {
-			return dev, nil, nil, err
-		}
+	nodes, err = c.store.GetNode(nil, c.nodename)
+	if err != nil {
+		return "", nil, nil, err
 	}
+
+	if !okAttach {
+		klog.V(2).Infof("expect node:%s, but status.node is %v", c.nodename, alcub.Status.Node)
+	}
+
+	dev, err = c.attachDevice(alcub)
+	if err != nil {
+		return dev, nil, nil, err
+	}
+
 	faielfunc := func() {
 		//TODO ensure device is removed success
 		c.detachDevice(alcub)
@@ -127,13 +142,7 @@ func (c *Node) preMountValid(alcub *alcubv1beta1.CsiAlcub) (string, delfn, okfn,
 		}
 		return c.alcubControl.Update(alcub.Name, nil, &alcub.Status)
 	}
-	if !okAttach {
-		//TODO not ready node and the volume be migrated to other node
-		return "", nil, nil, fmt.Errorf("not impl")
-	}
-	if dev == "" {
-		return "", nil, nil, fmt.Errorf("attach volulme successs, but the device path is null")
-	}
+
 	return dev, faielfunc, successfunc, nil
 }
 
@@ -141,10 +150,10 @@ func (c *Node) preUnmountValid(alcub *alcubv1beta1.CsiAlcub) (delfn, okfn, error
 	var (
 		err error
 	)
-	klog.V(2).Infof("in preUnmount, the status is %v, the nodename: %v", alcub.Status, c.nodename)
+	klog.V(2).Infof("in preUnmount, %s the volumeInfo is %v", alcub.Name, alcub.Status.VolumeInfo)
 	if alcub.Status.Node != c.nodename {
-		//TODO the volume had migerated when node is notready
-		return nil, nil, fmt.Errorf("not impl")
+		// Not here
+		return nil, nil, fmt.Errorf("node excepte:%v, but here is %v", alcub.Status.Node, c.nodename)
 	}
 	successfunc := func() error {
 		err = c.detachDevice(alcub)
@@ -152,16 +161,10 @@ func (c *Node) preUnmountValid(alcub *alcubv1beta1.CsiAlcub) (delfn, okfn, error
 			//TODO detachDevice func should be idempotent.
 			return err
 		}
-		alcub.Status = alcubv1beta1.CsiAlcubStatus{}
+		alcub.Status.Node = ""
 		return c.alcubControl.Update(alcub.Name, nil, &alcub.Status)
 	}
 	return nil, successfunc, nil
-}
-
-// check some zone in spec
-// now this is not need because json option is non omitempty
-func validAlcub(alcub *alcubv1beta1.CsiAlcub) error {
-	return nil
 }
 
 func getStoraIfIp(storeifname string) string {

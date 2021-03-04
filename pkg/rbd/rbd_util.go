@@ -2,6 +2,7 @@ package rbd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 
@@ -16,15 +17,17 @@ import (
 
 const (
 	imageWatcherStr = "watcher="
-
+	imageNotFound   = "No such file"
 	secretKeyName   = "key" // key name used in secret
 	rbdImageFormat1 = "1"
 	rbdImageFormat2 = "2"
 )
 
 var (
-	defaultRbdUtil = NewRbdUtil(time.Second * 5)
+	defaultRbdUtil = NewRbdUtil(time.Second * 10)
 )
+
+var errHadDeleted = errors.New("had deleted")
 
 type RBDUtil time.Duration
 
@@ -52,9 +55,9 @@ func (u RBDUtil) CreateImage(pOpts *rbdProvisionOptions, image string, bytessize
 	// rbd create
 	mon := u.kernelRBDMonitorsOpt(pOpts.monitors)
 	if pOpts.imageFormat == rbdImageFormat2 {
-		klog.V(4).Infof("rbd: create %s size %s format %s (features: %s) using mon %s, pool %s id %s key %s", image, volSz, pOpts.imageFormat, pOpts.imageFeatures, mon, pOpts.pool, pOpts.adminID, pOpts.adminSecret)
+		klog.V(2).Infof("rbd: create %s size %s format %s (features: %s) using mon %s, pool %s id %s key %s", image, volSz, pOpts.imageFormat, pOpts.imageFeatures, mon, pOpts.pool, pOpts.adminID, pOpts.adminSecret)
 	} else {
-		klog.V(4).Infof("rbd: create %s size %s format %s using mon %s, pool %s id %s key %s", image, volSz, pOpts.imageFormat, mon, pOpts.pool, pOpts.adminID, pOpts.adminSecret)
+		klog.V(2).Infof("rbd: create %s size %s format %s using mon %s, pool %s id %s key %s", image, volSz, pOpts.imageFormat, mon, pOpts.pool, pOpts.adminID, pOpts.adminSecret)
 	}
 	args := []string{"create", image, "--size", volSz, "--pool", pOpts.pool, "--id", pOpts.adminID, "-m", mon, "--key=" + pOpts.adminSecret, "--image-format", pOpts.imageFormat}
 	if pOpts.dataPool != "" {
@@ -107,11 +110,15 @@ func (u RBDUtil) rbdStatus(image string, pOpts *rbdProvisionOptions) (bool, erro
 
 	// If command never succeed, returns its last error.
 	if err != nil {
+		klog.Errorf("rbd status failed, output:%v, err:%v", output, err)
+		if strings.Contains(output, imageNotFound) {
+			return true, errHadDeleted
+		}
 		return false, err
 	}
 
 	if strings.Contains(output, imageWatcherStr) {
-		klog.V(4).Infof("rbd: watchers on %s: %s", image, output)
+		klog.V(2).Infof("rbd: watchers on %s: %s", image, output)
 		return true, nil
 	}
 	klog.Warningf("rbd: no watchers on %s", image)
@@ -122,6 +129,9 @@ func (u RBDUtil) rbdStatus(image string, pOpts *rbdProvisionOptions) (bool, erro
 func (u RBDUtil) DeleteImage(pOpts *rbdProvisionOptions, image string) error {
 	var output []byte
 	found, err := u.rbdStatus(image, pOpts)
+	if err == errHadDeleted {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -176,16 +186,16 @@ func (u RBDUtil) execCommand(command string, args []string) ([]byte, error) {
 
 	// Create the command with our context
 	cmd := exec.CommandContext(ctx, command, args...)
-	klog.V(4).Infof("Executing command: %v %v", command, args)
+	klog.V(2).Infof("Executing command: %v %s", command, args)
 	out, err := cmd.CombinedOutput()
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("rbd: Command timed out")
+		return out, fmt.Errorf("rbd: Command timed out")
 	}
 
 	// If there's no context error, we know the command completed (or errored).
 	if err != nil {
-		return nil, fmt.Errorf("rbd: Command exited with non-zero code: %v", err)
+		return out, fmt.Errorf("rbd: Command exited with non-zero code: %v", err)
 	}
 
 	return out, err

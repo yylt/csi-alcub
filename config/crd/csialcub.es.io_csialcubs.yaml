@@ -50,9 +50,9 @@ spec:
               description: capacity
               format: int64
               type: integer
-            image:
+            rbd_image:
               type: string
-            pool:
+            rbd_pool:
               description: alcub need pool and image, if not use alcub, pls add more
                 param.
               type: string
@@ -62,9 +62,9 @@ spec:
               type: string
           required:
           - capacity
-          - image
-          - pool
           - rbdStorageClass
+          - rbd_image
+          - rbd_pool
           - uuid
           type: object
         status:

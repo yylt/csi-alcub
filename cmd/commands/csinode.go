@@ -42,7 +42,7 @@ func NewNodeCmd() *cobra.Command {
 			)
 			storeDynConf.Nodename = nodename
 
-			s := store.NewClient(&storeConf, &storeDynConf)
+			s := store.NewClient(&storeConf, &storeDynConf, alcubconntimeout)
 			rbd := rbd2.NewRbd(client, time.Second*5)
 
 			csiNode := noderpc.NewNode(s, alcubcon, rbd, nodename, storageIfName)

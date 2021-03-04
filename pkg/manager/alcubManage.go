@@ -8,6 +8,7 @@ import (
 
 	alcubv1beta1 "github.com/yylt/csi-alcub/pkg/api/v1beta1"
 	mtypes "github.com/yylt/csi-alcub/types"
+
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,14 +26,14 @@ var (
 )
 
 type Nodeinfo struct {
-	StoreIp  net.IP
-	NodeUrls []string
+	StoreIp net.IP
+	Zones   []string
 }
 
 func (ni *Nodeinfo) DeepCopy() *Nodeinfo {
 	tmpn := &Nodeinfo{}
 	copy(tmpn.StoreIp, ni.StoreIp)
-	copy(tmpn.NodeUrls, ni.NodeUrls)
+	copy(tmpn.Zones, ni.Zones)
 	return tmpn
 }
 
@@ -43,10 +44,13 @@ type AlcubCon struct {
 
 	mu sync.RWMutex
 
+	// key: uuid, value: nodename
 	uuidname map[string]string
 
 	nodemu sync.RWMutex
-	nodes  map[string]*Nodeinfo
+
+	// key: nodename, value:
+	nodes map[string]*Nodeinfo
 }
 
 func NewAlcubCon(mgr ctrl.Manager) *AlcubCon {
@@ -83,14 +87,14 @@ func (al *AlcubCon) Reconcile(ctx context.Context, req reconcile.Request) (recon
 	if err != nil {
 		if apierrs.IsNotFound(err) {
 			// Delete event
-			klog.Info("object had deleted", "object", req.String())
+			klog.Infof("object had deleted: %v", req.String())
 			return ctrl.Result{}, nil
 		}
-		klog.Error(err, "get object failed", "object", req.String())
+		klog.Errorf("object get failed: %v", req.String())
 		return reconcile.Result{}, err
 	}
 	if alcub.DeletionTimestamp != nil {
-		klog.Info("object is deleting", "object", req.String())
+		klog.Infof("object is deleting: %v", req.String())
 		if al.validBeDelete(&alcub) == nil {
 			alcub.Finalizers = nil
 			retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -161,10 +165,6 @@ func (al *AlcubCon) Delete(name string) error {
 	if err != nil {
 		return err
 	}
-	err = al.validBeDelete(obj)
-	if err != nil {
-		return err
-	}
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		return al.client.Delete(al.ctx, obj)
@@ -182,6 +182,20 @@ func (al *AlcubCon) GetByUuid(uuid string) *alcubv1beta1.CsiAlcub {
 		return nil
 	}
 	return al.GetByName(name)
+}
+
+func (al *AlcubCon) ForEach(fn func(a *alcubv1beta1.CsiAlcub)) error {
+	var (
+		lists alcubv1beta1.CsiAlcubList
+	)
+	err := al.client.List(al.ctx, &lists)
+	if err != nil {
+		return err
+	}
+	for _, alcub := range lists.Items {
+		fn(&alcub)
+	}
+	return nil
 }
 
 func (al *AlcubCon) GetByName(name string) *alcubv1beta1.CsiAlcub {
@@ -250,6 +264,8 @@ func (al *AlcubCon) GetNodeInfo(nodename string) *Nodeinfo {
 	return nil
 }
 
+// save status node info
+// when storage ip
 func (al *AlcubCon) reverseNode(stat *alcubv1beta1.CsiAlcubStatus) {
 	al.nodemu.Lock()
 	defer al.nodemu.Unlock()
@@ -269,16 +285,16 @@ func (al *AlcubCon) reverseNode(stat *alcubv1beta1.CsiAlcubStatus) {
 	oldv, ok := al.nodes[stat.Node]
 	if !ok {
 		oldv = &Nodeinfo{
-			StoreIp:  nil,
-			NodeUrls: nil,
+			StoreIp: nil,
+			Zones:   nil,
 		}
 	}
-	//TODO: check ip only enough?
+
 	if oldv.StoreIp.Equal(ip) {
 		return
 	}
 	oldv.StoreIp = ip
-	copy(oldv.NodeUrls, stat.AllNodes)
+	copy(oldv.Zones, stat.AllNodes)
 	al.nodes[stat.Node] = oldv
 }
 
@@ -299,12 +315,6 @@ func (al *AlcubCon) reverseUuid(uuid, name string) error {
 func (al *AlcubCon) validBeDelete(alcub *alcubv1beta1.CsiAlcub) error {
 	if alcub.Status.Node != "" {
 		return fmt.Errorf("status node is not nil")
-	}
-	if alcub.Status.Prenode != "" {
-		return fmt.Errorf("status preNode is not nil")
-	}
-	if alcub.Status.VolumeInfo.Devpath != "" {
-		return fmt.Errorf("status volumeinfo is not null")
 	}
 	return nil
 }

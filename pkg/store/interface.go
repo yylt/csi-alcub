@@ -9,7 +9,7 @@ type Alcuber interface {
 	// Detach is dev_disconnect
 	DoConn(conf *DynConf, pool, image string) (string, error)
 	DoDisConn(conf *DynConf, pool, image string) error
-
+	GetImageStatus(conf *DynConf, pool, image string) bool
 	// notice alcuber the node is not ready
 	// because shutdown, network down, etc...
 	FailNode(conf *DynConf, node string) error

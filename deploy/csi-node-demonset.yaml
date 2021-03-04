@@ -17,11 +17,12 @@ spec:
       hostNetwork: true
       containers:
         - name: node
-          image: hub.easystack.io/csi-alcub/hyper:v11
+          image: hub.easystack.io/csi-alcub/hyper:v1
           args:
             - "node"
             - "--driver-name=alcub.csi.es.io"
-            - "--v=5"
+            - "-v=5"
+            - "--alcub-conn-timeout=5m"
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--node-name=$(KUBE_NODE_NAME)"
             - "--alcub-api-url=alcubierre"
@@ -31,7 +32,7 @@ spec:
             - "--storage-if-name=br-storagepub"
           env:
             - name: CSI_ENDPOINT
-              value: unix:///csi/csi.sock
+              value: unix:///csi/csi-node.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -41,24 +42,21 @@ spec:
             privileged: true
           volumeMounts:
             - mountPath: /csi
-              name: socket-dir
+              name: run
             - name: ceph-etc
               mountPath: /etc/ceph/ceph.conf
               subPath: ceph.conf
             - mountPath: /var/lib/kubelet/pods
               mountPropagation: Bidirectional
               name: mountpoint-dir
-            - mountPath: /var/lib/kubelet/plugins
-              mountPropagation: Bidirectional
-              name: plugins-dir
             - mountPath: /dev
               name: dev-dir
         - name: registry
-          image: hub.easystack.io/csi/csi-node-regist:v1
+          image: hub.easystack.io/production/csi-node-regist:v2.1.0
           args:
-            - --v=5
-            - --csi-address=/csi/csi.sock
-            - --kubelet-registration-path=/var/lib/kubelet/plugins/csi-alcub/csi.sock
+            - -v=5
+            - -csi-address=/csi/csi-node.sock
+            - -kubelet-registration-path=/run/csi/csi-node.sock
           securityContext:
             privileged: true
           env:
@@ -69,14 +67,10 @@ spec:
                   fieldPath: spec.nodeName
           volumeMounts:
             - mountPath: /csi
-              name: socket-dir
+              name: run
             - mountPath: /registration
               name: registration-dir
       volumes:
-        - hostPath:
-            path: /var/lib/kubelet/plugins/csi-alcub
-            type: DirectoryOrCreate
-          name: socket-dir
         - hostPath:
             path: /var/lib/kubelet/pods
             type: DirectoryOrCreate
@@ -86,9 +80,9 @@ spec:
             type: Directory
           name: registration-dir
         - hostPath:
-            path: /var/lib/kubelet/plugins
-            type: Directory
-          name: plugins-dir
+            path: /run/csi
+            type: DirectoryOrCreate
+          name: run
         - hostPath:
             path: /dev
             type: Directory

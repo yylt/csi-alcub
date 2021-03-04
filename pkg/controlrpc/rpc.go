@@ -72,20 +72,23 @@ func (c *Controller) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequ
 		}, nil
 	}
 
-	volumeID := uuid.NewUUID().String()
-	//TODO add volume id into volumeContext and check by node
-	_, err := c.createVolume(req.GetParameters(), req.GetName(), volumeID, capacity)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create volume %v, %v", volumeID, err)
+	//TODO check node alcub ready?
+	if len(c.node.LabledNodes()) == 0 {
+		return nil, status.Errorf(codes.Unavailable, "There are not any node can attach volume")
 	}
 
-	//TODO both add to topology?
 	if accessReq := req.GetAccessibilityRequirements(); accessReq != nil {
 		if accessReq.Requisite != nil {
 			topologies = accessReq.Requisite
 		} else if accessReq.Preferred != nil {
 			topologies = accessReq.Preferred
 		}
+	}
+
+	volumeID := uuid.NewUUID().String()
+	_, err := c.createVolume(req.GetParameters(), req.GetName(), volumeID, capacity)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create volume %v, %v", volumeID, err)
 	}
 
 	return &csi.CreateVolumeResponse{
@@ -108,14 +111,14 @@ func (c *Controller) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequ
 	)
 	alcub := c.alcubControl.GetByUuid(volid)
 	if alcub == nil {
-		klog.V(4).Infof("volume %v had deleted!", volid)
+		klog.V(2).Infof("volume %v had deleted!", volid)
 		return &csi.DeleteVolumeResponse{}, nil
 	}
 	err := c.deleteVolume(alcub)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete volume %v: %v", volid, err)
 	}
-	klog.V(4).Infof("volume %v successfully deleted", volid)
+	klog.V(2).Infof("volume %v successfully deleted", volid)
 	return &csi.DeleteVolumeResponse{}, nil
 }
 

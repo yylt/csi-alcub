@@ -5,7 +5,8 @@ metadata:
 spec:
   containers:
     - name: my-frontend
-      image: busybox
+      image: hub.easystack.io/arm64v8/escloud-linux-source-busybox:latest
+      imagePullPolicy: IfNotPresent
       volumeMounts:
         - mountPath: "/data"
           name: my-csi-volume

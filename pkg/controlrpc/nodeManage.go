@@ -4,19 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/util/retry"
 	klog "k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-)
-
-const (
-//NodeAlcubLabelKey = "csi-alcub"
-//NodeAlcubLabelVal = "enable"
 )
 
 type updateNodeFn func(node *corev1.Node)
@@ -24,10 +19,10 @@ type updateNodeFn func(node *corev1.Node)
 var (
 	UnreachableTaintTemplate = &corev1.Taint{
 		Key:    corev1.TaintNodeUnreachable,
-		Effect: corev1.TaintEffectNoExecute,
+		Effect: corev1.TaintEffectNoSchedule,
 	}
 	//hosthaKv   = map[string]string{"hostha-maintain": "true"}
-	csiBlackKv = map[string]string{"csi-alcub-maintain": "true"}
+	csiBlackKv = map[string]string{"csi-alcub.io/maintain": "true"}
 
 	tempNodeKey = "%N"
 )
@@ -90,7 +85,6 @@ func (n *Node) labelController(labels map[string]string, nodename string) update
 	key := string(tempReplace(n.filterKey, tmpmap))
 	val := string(tempReplace(n.filtervalue, tmpmap))
 
-	klog.V(2).Infof("label controller filter label: %s=%s", key, val)
 	for k, v := range labels {
 		if key == k && val == v {
 			alcubExist = true
@@ -100,14 +94,13 @@ func (n *Node) labelController(labels map[string]string, nodename string) update
 			nodeLabelExist = true
 		}
 	}
-
+	klog.V(5).Infof("node(%s) alcub-manager label exist:%s, csi node label exist:%s", nodename, alcubExist, nodeLabelExist)
 	// delete csi label
 	if !alcubExist {
-		klog.V(2).Infof("node %s is not alcub type!", nodename)
 		if !nodeLabelExist {
 			return nil
 		}
-		klog.Infof("csi labelkey exist, but node do not have alcub label")
+		klog.V(2).Infof("remove csi node label on node %s", nodename)
 		return func(node *corev1.Node) {
 			for k, _ := range n.csilabel {
 				delete(node.Labels, k)
@@ -119,6 +112,7 @@ func (n *Node) labelController(labels map[string]string, nodename string) update
 	if nodeLabelExist {
 		return nil
 	}
+	klog.V(2).Infof("add csi node label on node %s", nodename)
 	return func(node *corev1.Node) {
 		for k, v := range n.csilabel {
 			node.Labels[k] = v
@@ -126,42 +120,67 @@ func (n *Node) labelController(labels map[string]string, nodename string) update
 	}
 }
 
+// node notready or maintain should do someting
+// 1. add/remove blacklist
+// 2. call some api
+// DEPRECATED, it's useless now!
 func (n *Node) notreadyController(node *corev1.Node) updateNodeFn {
-	if len(node.Spec.Taints) == 0 {
-		return nil
-	}
 	var (
-		nodeUnreach bool
+		notready   bool
+		hamaintain bool
+		csiblack   bool
 	)
-	for _, taint := range node.Spec.Taints {
-		//TODO(y) check Unreachable Taint maybe too late
-		if taint.MatchTaint(UnreachableTaintTemplate) {
-			nodeUnreach = true
-		}
+	if node.Spec.Unschedulable {
+		notready = true
 	}
-
-	// check or update label
-	if nodeUnreach && !inMaps(node.Labels, csiBlackKv) {
-		err := n.manager.StopNode(node.Name, !inMaps(node.Labels, n.halabel))
-		if err != nil {
-			klog.Errorf("controller stop node failed: %v", err)
+	if inMaps(node.Labels, n.halabel) {
+		hamaintain = true
+	}
+	if inMaps(node.Annotations, csiBlackKv) {
+		csiblack = true
+	}
+	// reference: doc/csi故障处理
+	// node is in probleam state, shold stop_node
+	if notready && hamaintain {
+		if csiblack {
+			klog.V(2).Infof("csi black label still exist, skip call stop_node")
 			return nil
-		}
-		return func(node *corev1.Node) {
-			for k, v := range csiBlackKv {
-				node.Labels[k] = v
+		} else {
+			err := n.manager.StopNode(node.Name, !inMaps(node.Labels, n.halabel))
+			if err != nil {
+				klog.Errorf("call stop_node failed: %v", err)
+				return nil
+			}
+			klog.V(2).Infof("success call stop_node")
+			return func(node *corev1.Node) {
+				for k, v := range csiBlackKv {
+					node.Annotations[k] = v
+				}
 			}
 		}
 	}
-	if !nodeUnreach && inMaps(node.Labels, csiBlackKv) {
-		err := n.manager.StartNode(node.Name, !inMaps(node.Labels, n.halabel))
-		if err != nil {
-			klog.Errorf("controller start node failed: %v", err)
-			return nil
+	// should check node recover from csi black status
+	if csiblack {
+		var isrecover = true
+		if notready || hamaintain {
+			isrecover = false
 		}
-		return func(node *corev1.Node) {
-			for k, _ := range csiBlackKv {
-				delete(node.Labels, k)
+		for _, taint := range node.Spec.Taints {
+			if taint.MatchTaint(UnreachableTaintTemplate) {
+				isrecover = false
+			}
+		}
+		if isrecover {
+			err := n.manager.StartNode(node.Name, !inMaps(node.Labels, n.halabel))
+			if err != nil {
+				klog.Errorf("controller start node failed: %v", err)
+				return nil
+			}
+			klog.Infof("success controller start node")
+			return func(node *corev1.Node) {
+				for k, _ := range csiBlackKv {
+					delete(node.Annotations, k)
+				}
 			}
 		}
 	}
@@ -194,15 +213,49 @@ func (n *Node) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.
 	if fn != nil {
 		updateFns = append(updateFns, fn)
 	}
-	fn = n.notreadyController(&node)
-	if fn != nil {
-		updateFns = append(updateFns, fn)
-	}
-	//TODO the node which beccome ready should remove blacklist
 	return ctrl.Result{}, err
 }
 
+func (n *Node) NotReadyNodes() []string {
+	var (
+		nodes    corev1.NodeList
+		retnodes []string
+	)
+	err := n.client.List(n.ctx, &nodes)
+	if err != nil {
+		klog.Errorf("list node failed:%v", err)
+		return retnodes
+	}
+	for _, node := range nodes.Items {
+		for _, taint := range node.Spec.Taints {
+			if taint.MatchTaint(UnreachableTaintTemplate) {
+				retnodes = append(retnodes, node.Name)
+			}
+		}
+	}
+	return retnodes
+}
+
+func (n *Node) LabledNodes() []string {
+	var (
+		nodes    corev1.NodeList
+		retnodes []string
+	)
+	err := n.client.List(n.ctx, &nodes)
+	if err != nil {
+		klog.Errorf("list node failed:%v", err)
+		return retnodes
+	}
+	for _, node := range nodes.Items {
+		if inMaps(node.Labels, n.csilabel) {
+			retnodes = append(retnodes, node.Name)
+		}
+	}
+	return retnodes
+}
+
 func (n *Node) updateNode(req reconcile.Request, fns []updateNodeFn) {
+
 	retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		original := &corev1.Node{}
 
@@ -223,7 +276,10 @@ func (n *Node) updateNode(req reconcile.Request, fns []updateNodeFn) {
 }
 
 func inMaps(src map[string]string, kv map[string]string) bool {
-	if kv == nil || src == nil {
+	if kv == nil {
+		return true
+	}
+	if src == nil {
 		return false
 	}
 	for k, v := range kv {

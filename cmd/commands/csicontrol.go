@@ -41,7 +41,7 @@ func NewControllerCmd() *cobra.Command {
 
 			alcubcon := manager.NewAlcubCon(mgr)
 
-			s := store.NewClient(&storeConf, nil)
+			s := store.NewClient(&storeConf, nil, alcubconntimeout)
 
 			hamap := splitLabel(labels.hakv)
 			csimap := splitLabel(labels.csilabelkv)
@@ -51,14 +51,14 @@ func NewControllerCmd() *cobra.Command {
 				filtervalue = []byte(v)
 			}
 
-			rbd := rbd2.NewRbd(client, time.Second*5)
+			rbd := rbd2.NewRbd(client, time.Second*10)
 			csiController := controlrpc.NewController(nodename, s, alcubcon, rbd)
 
-			_, err = controlrpc.NewNode(mgr, csiController, filterkey, filtervalue, hamap, csimap)
+			nodemanager, err := controlrpc.NewNode(mgr, csiController, filterkey, filtervalue, hamap, csimap)
 			if err != nil {
 				return err
 			}
-
+			csiController.SetupNode(nodemanager)
 			csiIdentify, err := server.NewIdenty(drivername, server.ControllerCapability())
 			if err != nil {
 				return err
